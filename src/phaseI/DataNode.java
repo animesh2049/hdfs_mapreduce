@@ -1,5 +1,6 @@
 package phaseI;
 
+
 import phaseI.Hdfs.ReadBlockRequest;
 import phaseI.Hdfs.ReadBlockResponse;
 import phaseI.Hdfs.WriteBlockRequest;
@@ -12,12 +13,19 @@ import phaseI.Hdfs;
 import java.sql.ResultSet;
 
 import com.google.protobuf.InvalidProtocolBufferException;
+import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
+
+import javax.swing.plaf.SliderUI;
 
 public class DataNode implements DataNodeRemoteInterfaces {
 
-	
-	
 	private static String persistanceFile = "datanode.conf";
+	private static Registry registry = null;
+	private static RemoteInterfaces nameNode = null;
+	private static String host = null;
+	private static int myId = 1;
 	
 	public DataNode(){}
 	
@@ -103,6 +111,49 @@ public class DataNode implements DataNodeRemoteInterfaces {
 	
 	public static void main(String[] args){
 		
+		try {
+			registry = LocateRegistry.getRegistry(host);
+			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
+		} catch (Exception e){
+			System.err.println("Err msg : " + e.toString());
+			System.exit(1);
+		}
+		
+		Thread heartBeatThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					Thread.sleep(1000);
+				} catch (InterruptedException e) {
+					System.err.println("Interrupted from sleep");
+				}
+				try {
+					sendHeartBeat();
+				} catch (RemoteException e) {
+					System.err.println("Unable to find NameNode");
+				}
+			}
+		});
+		Thread blockReportThread = new Thread(new Runnable() {
+			public void run() {
+				try {
+					Thread.sleep(2000);
+				} catch (InterruptedException e) {
+					System.err.println("Interrupted from sleep");
+				}
+				sendBlockReport();
+			}
+		});
+		
+		heartBeatThread.start();
+		blockReportThread.start();
+
 	}
 	
+	public static void sendHeartBeat() throws RemoteException {
+		nameNode.heartBeat(Hdfs.HeartBeatRequest.newBuilder().setId(myId).build().toByteArray());
+	}
+	
+	public static void sendBlockReport() {
+		
+	}
 }
