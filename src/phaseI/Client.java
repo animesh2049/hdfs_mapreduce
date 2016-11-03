@@ -28,7 +28,7 @@ public class Client {
 
 		try {
 			registry = LocateRegistry.getRegistry(host);
-			RemoteInterfaces nameNode = (RemoteInterfaces) registry.lookup("NameNode");
+			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
 		} catch (Exception e){
 			System.err.println("Err msg : " + e.toString());
 			System.exit(1);

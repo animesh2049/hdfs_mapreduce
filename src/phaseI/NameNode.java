@@ -21,6 +21,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Random;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 public class NameNode implements RemoteInterfaces {
@@ -33,6 +35,7 @@ public class NameNode implements RemoteInterfaces {
 	private static HashSet<Integer> aliveDataNode;
 	private static HashMap<Integer, DataNodeLocation> idToDatanode;
 	private static HashMap<Integer, ArrayList<Integer>> idToBlock;
+	private static Lock lock;
 	
 	public NameNode() throws RemoteException {
 		super();
@@ -46,6 +49,7 @@ public class NameNode implements RemoteInterfaces {
 				break;
 			}
 		}
+		
 		String toWrite = fileName + "--" + fileHandle + "--";
 		for(Integer block : handleToBlocks.get(fileHandle)) {
 			toWrite += block + ",";
@@ -54,6 +58,7 @@ public class NameNode implements RemoteInterfaces {
 		
 	    BufferedWriter bw = null;
 	    
+	    lock.lock();
 	    try {					// Do it in lock
 	    	bw = new BufferedWriter(new FileWriter(persistanceFile, true));
 	    	bw.write(toWrite);
@@ -62,8 +67,11 @@ public class NameNode implements RemoteInterfaces {
 	    	bw.close();
 	    } catch (Exception e) {
 	    	System.err.println("Err msg : " + e.toString());
+	    	lock.unlock();
 	    	return 1;
 	    }
+	    lock.unlock();
+	    
 	    return 0;
 	}
 	
@@ -127,9 +135,25 @@ public class NameNode implements RemoteInterfaces {
 			System.err.println("Err msg : " + e.toString());
 		}
 		int tempBlockNumber = ++blockNumber;
-		int tempNodeId = (int) aliveDataNode.toArray()[randomNumber.nextInt(aliveDataNode.size())];
-		Hdfs.DataNodeLocation tempDataNodeLocation =  idToDatanode.get(tempNodeId);
-		Hdfs.AssignBlockResponse.Builder tempBlockLocation = Hdfs.AssignBlockResponse.newBuilder();
+		handleToBlocks.get(tempHandle).add(tempBlockNumber);
+		int temp1 = randomNumber.nextInt(aliveDataNode.size());
+		int temp2;
+		while ( (temp2 = randomNumber.nextInt(aliveDataNode.size())) == temp1) {
+			continue;
+		}
+		
+		int tempNodeId1 = (int) aliveDataNode.toArray()[temp1];
+		int tempNodeId2 = (int) aliveDataNode.toArray()[temp2];
+		ArrayList<Hdfs.DataNodeLocation> tempDataNodeLocations =  new ArrayList<Hdfs.DataNodeLocation>();
+		tempDataNodeLocations.add(idToDatanode.get(tempNodeId1));
+		tempDataNodeLocations.add(idToDatanode.get(tempNodeId2));
+		Hdfs.BlockLocations.Builder tempBlockLocations = Hdfs.BlockLocations.newBuilder();
+		tempBlockLocations.addAllLocations(tempDataNodeLocations);
+		
+		Hdfs.AssignBlockResponse.Builder tempResponse = Hdfs.AssignBlockResponse.newBuilder();
+		tempResponse.setNewBlock(tempBlockLocations);
+		tempResponse.setStatus(0);
+		return tempResponse.build().toByteArray();
 	}
 	
 	public byte[] listFile(byte[] message) {
@@ -170,6 +194,7 @@ public class NameNode implements RemoteInterfaces {
 		aliveDataNode = new HashSet<Integer>();
 		idToDatanode = new HashMap<Integer, DataNodeLocation>();
 		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
+		lock = new ReentrantLock();
 		
 		InputStream fStream = new FileInputStream(persistanceFile);
 		InputStreamReader fStreamReader = new InputStreamReader(fStream, Charset.forName("UTF-8"));
