@@ -14,13 +14,11 @@ import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.nio.charset.Charset;
-import java.rmi.registry.Registry;
-import java.rmi.registry.LocateRegistry;
+import java.rmi.AlreadyBoundException;
 import java.rmi.RemoteException;
+import java.rmi.registry.LocateRegistry;
+import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
-import phaseI.Hdfs;
-import phaseI.Hdfs.DataNodeLocation;
-
 import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -29,8 +27,11 @@ import java.util.Random;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import phaseI.Hdfs.DataNodeLocation;
 
-public class NameNode implements RemoteInterfaces {
+
+public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
+	private static final long serialVersionUID = 1L;
 	private static int handle = 0;
 	private static int blockNumber = 0;
 	private static HashMap<String, Integer> handler;
@@ -43,7 +44,8 @@ public class NameNode implements RemoteInterfaces {
 	private static Lock lock1, lock2, lock3, lock4;
 	private static String myIp, interfaceToConnect;
 	
-	public NameNode() throws NumberFormatException, IOException {
+	public NameNode() throws NumberFormatException, IOException, RemoteException {
+		super();
 		String line;
 		handler = new HashMap<String, Integer>();
 		handleToBlocks = new HashMap<Integer, ArrayList<Integer>>();
@@ -240,7 +242,7 @@ public class NameNode implements RemoteInterfaces {
 	
 	public static void main(String[] args) throws IOException {
 		
-		Inet4Address inetAddress = null;
+		/*Inet4Address inetAddress = null;
 		
 		try {
 			Enumeration<InetAddress> enumeration = NetworkInterface.getByName(interfaceToConnect).getInetAddresses();
@@ -257,16 +259,16 @@ public class NameNode implements RemoteInterfaces {
 		if (inetAddress == null) {
 			System.err.println("Error Obtaining Network Information");
 			System.exit(-1);
-		}
+		}*/
 		
-		try {
-			NameNode namenode = new NameNode();
-			RemoteInterfaces mystub = (RemoteInterfaces) UnicastRemoteObject.exportObject(namenode, 0);
-			Registry localRegistry = LocateRegistry.getRegistry(inetAddress.getHostAddress());
-			localRegistry.bind("NameNode", mystub);
-		} catch (Exception e){
-			System.err.println("Server Exception: " + e.toString());
-		}
+			try {
+				//NameNode namenode = new NameNode();
+				//RemoteInterfaces mystub = (RemoteInterfaces) UnicastRemoteObject.exportObject(namenode, 0);
+				Registry localRegistry = LocateRegistry.getRegistry();
+				localRegistry.rebind("NameNode", new NameNode());
+			} catch (Exception e) {
+				System.out.println("Server Err : " + e.toString());
+			}
 	}
 	
 	public byte[] heartBeat(byte[] message) {

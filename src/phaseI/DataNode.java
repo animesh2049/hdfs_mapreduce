@@ -184,6 +184,8 @@ public class DataNode implements DataNodeRemoteInterfaces {
 			DataNode dataNode = new DataNode();
 			DataNodeRemoteInterfaces mystub = (DataNodeRemoteInterfaces) UnicastRemoteObject.exportObject(dataNode, 0);
 			Registry localRegistry = LocateRegistry.getRegistry(inetAddress.getHostAddress());
+		} catch (Exception e) {
+			e.printStackTrace();
 		}
 
 	}

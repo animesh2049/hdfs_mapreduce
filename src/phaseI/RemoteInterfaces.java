@@ -3,7 +3,7 @@ package phaseI;
 import java.rmi.Remote;
 import java.rmi.RemoteException;
 
-public interface RemoteInterfaces extends Remote{
+public interface RemoteInterfaces extends Remote {
 	byte[] openFile(byte[] message) throws RemoteException;
 	byte[] closeFile(byte[] message) throws RemoteException;
 	byte[] assignBlock(byte[] message) throws RemoteException;
