@@ -9,6 +9,10 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.net.Inet4Address;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.nio.charset.Charset;
 import java.rmi.registry.Registry;
 import java.rmi.registry.LocateRegistry;
@@ -18,6 +22,7 @@ import phaseI.Hdfs;
 import phaseI.Hdfs.DataNodeLocation;
 
 import java.util.ArrayList;
+import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Random;
@@ -35,10 +40,53 @@ public class NameNode implements RemoteInterfaces {
 	private static HashSet<Integer> aliveDataNode;
 	private static HashMap<Integer, DataNodeLocation> idToDatanode;
 	private static HashMap<Integer, ArrayList<Integer>> idToBlock;
-	private static Lock lock;
+	private static Lock lock1, lock2, lock3, lock4;
+	private static String myIp, interfaceToConnect;
 	
-	public NameNode() throws RemoteException {
-		super();
+	public NameNode() throws NumberFormatException, IOException {
+		String line;
+		handler = new HashMap<String, Integer>();
+		handleToBlocks = new HashMap<Integer, ArrayList<Integer>>();
+		blockToReplicas = new HashMap<Integer, HashSet<DataNodeLocation>>();
+		aliveDataNode = new HashSet<Integer>();
+		idToDatanode = new HashMap<Integer, DataNodeLocation>();
+		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
+		lock1 = lock2 = lock3 = lock4 = new ReentrantLock();
+		
+		InputStream fStream = null;
+		try {
+			fStream = new FileInputStream(persistanceFile);
+		} catch (FileNotFoundException e1) {
+			System.err.println("Config file not found :( creating new file");
+			File confFile = new File(persistanceFile);
+			confFile.createNewFile();
+		}
+		
+		InputStreamReader fStreamReader = new InputStreamReader(fStream, Charset.forName("UTF-8"));
+		BufferedReader fBufferReader = new BufferedReader(fStreamReader);
+		
+		while( (line = fBufferReader.readLine()) != null) {
+			String[] splittedString = line.split("--");
+			handler.put(splittedString[0], Integer.parseInt(splittedString[1]));
+			String[] blockString = splittedString[2].split(",");
+			ArrayList<Integer> blockNums = new ArrayList<Integer>();
+			for(String tempString : blockString) {
+				blockNums.add(Integer.parseInt(tempString));
+			}
+			
+			lock3.lock();
+			handleToBlocks.put(Integer.parseInt(splittedString[1]), blockNums);
+			lock3.unlock();
+		}
+		
+		try {
+			fStream.close();
+			fStreamReader.close();
+			fBufferReader.close();
+		} catch (IOException e) {
+			System.err.println("Err msg : " + e.toString());
+			e.printStackTrace();
+		}
 	}
 	
 	private static int commit(int fileHandle) throws IOException {
@@ -58,7 +106,7 @@ public class NameNode implements RemoteInterfaces {
 		
 	    BufferedWriter bw = null;
 	    
-	    lock.lock();
+	    lock1.lock();
 	    try {					// Do it in lock
 	    	bw = new BufferedWriter(new FileWriter(persistanceFile, true));
 	    	bw.write(toWrite);
@@ -67,10 +115,10 @@ public class NameNode implements RemoteInterfaces {
 	    	bw.close();
 	    } catch (Exception e) {
 	    	System.err.println("Err msg : " + e.toString());
-	    	lock.unlock();
+	    	lock1.unlock();
 	    	return 1;
 	    }
-	    lock.unlock();
+	    lock1.unlock();
 	    
 	    return 0;
 	}
@@ -102,8 +150,12 @@ public class NameNode implements RemoteInterfaces {
 			}
 		} else {  // For writing
 			responseHandle = ++handle;
+			
+			lock2.lock();
 			handler.put(fileName, handle);
 			handleToBlocks.put(handle, new ArrayList<Integer>());
+			lock2.unlock();
+			
 			response.setHandle(responseHandle);
 			response.setStatus(0);
 		}
@@ -187,39 +239,31 @@ public class NameNode implements RemoteInterfaces {
 	}
 	
 	public static void main(String[] args) throws IOException {
-		String line;
-		handler = new HashMap<String, Integer>();
-		handleToBlocks = new HashMap<Integer, ArrayList<Integer>>();
-		blockToReplicas = new HashMap<Integer, HashSet<DataNodeLocation>>();
-		aliveDataNode = new HashSet<Integer>();
-		idToDatanode = new HashMap<Integer, DataNodeLocation>();
-		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
-		lock = new ReentrantLock();
 		
-		InputStream fStream = new FileInputStream(persistanceFile);
-		InputStreamReader fStreamReader = new InputStreamReader(fStream, Charset.forName("UTF-8"));
-		BufferedReader fBufferReader = new BufferedReader(fStreamReader);
+		Inet4Address inetAddress = null;
 		
-		while( (line = fBufferReader.readLine()) != null) {
-			String[] splittedString = line.split("--");
-			handler.put(splittedString[0], Integer.parseInt(splittedString[1]));
-			String[] blockString = splittedString[2].split(",");
-			ArrayList<Integer> blockNums = new ArrayList<Integer>();
-			for(String tempString : blockString) {
-				blockNums.add(Integer.parseInt(tempString));
+		try {
+			Enumeration<InetAddress> enumeration = NetworkInterface.getByName(interfaceToConnect).getInetAddresses();
+			while (enumeration.hasMoreElements()) {
+				InetAddress tempInetAddress = enumeration.nextElement();
+				if (tempInetAddress instanceof Inet4Address) {
+					inetAddress = (Inet4Address) tempInetAddress;
+				}
 			}
-			handleToBlocks.put(Integer.parseInt(splittedString[1]), blockNums);
+		} catch (SocketException e) {
+			e.printStackTrace();
 		}
 		
-		fStream.close();
-		fStreamReader.close();
-		fBufferReader.close();
+		if (inetAddress == null) {
+			System.err.println("Error Obtaining Network Information");
+			System.exit(-1);
+		}
 		
 		try {
 			NameNode namenode = new NameNode();
 			RemoteInterfaces mystub = (RemoteInterfaces) UnicastRemoteObject.exportObject(namenode, 0);
-			Registry localRegistry = LocateRegistry.getRegistry();
-			localRegistry.bind("NameNode", mystub);			
+			Registry localRegistry = LocateRegistry.getRegistry(inetAddress.getHostAddress());
+			localRegistry.bind("NameNode", mystub);
 		} catch (Exception e){
 			System.err.println("Server Exception: " + e.toString());
 		}
@@ -251,8 +295,10 @@ public class NameNode implements RemoteInterfaces {
 			System.err.println("Err msg : " + e.toString());
 		}
 		
-		idToDatanode.put(dataNodeId, dataNodeLocation); // Put this in a thread and these two operations should be inside lock
+		lock4.lock();
+		idToDatanode.put(dataNodeId, dataNodeLocation);
 		idToBlock.put(dataNodeId, blockNums);
+		lock4.unlock();
 		
 		return Hdfs.BlockReportResponse.newBuilder().addStatus(0).build().toByteArray();
 	}
