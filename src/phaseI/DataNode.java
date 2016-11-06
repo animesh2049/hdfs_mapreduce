@@ -1,15 +1,12 @@
 package phaseI;
 
 
-import phaseI.Hdfs.ReadBlockRequest;
-import phaseI.Hdfs.ReadBlockResponse;
-import phaseI.Hdfs.WriteBlockRequest;
+import phaseI.Hdfs;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.PreparedStatement;
-import phaseI.Hdfs;
 import java.sql.ResultSet;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -25,10 +22,10 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 
-import javax.swing.plaf.SliderUI;
 
-public class DataNode implements DataNodeRemoteInterfaces {
+public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInterfaces {
 
+	private static final long serialVersionUID = 1L;
 	private static Registry registry = null;
 	private static RemoteInterfaces nameNode = null;
 	private static String host = null;
@@ -40,40 +37,65 @@ public class DataNode implements DataNodeRemoteInterfaces {
 	private static String interfaceToConnect;
 	private static String nameNodeIp;
 	
-	public DataNode(){
-		myPort = 1099;
+	public DataNode() throws RemoteException {
+		super();
+		myId = 1;
 		try {
-			con = DriverManager.getConnection("jdbc:mysql://localhost:3306","testuser","test");
-			stmt = con.createStatement();
+			registry = LocateRegistry.getRegistry("172.28.128.3");
+			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
+		} catch (Exception e) {
+			e.printStackTrace();
+			System.exit(1);
+		}
+
+		try {
 			Class.forName("com.mysql.jdbc.Driver");
+			con = DriverManager.getConnection("jdbc:mysql://localhost:3306?useSSL=false","testuser","test");
+			stmt = con.createStatement();
 		} catch (SQLException e1) {
 			e1.printStackTrace();
 		} catch (ClassNotFoundException e) {
 			e.printStackTrace();
 		}
 		
+		try {
+			stmt.executeUpdate("create database if not exists hdfs");
+			stmt.execute("use hdfs");
+			stmt.executeUpdate("create table if not exists datablock(blocknum int,data longtext,primary key(blocknum))");	
+		} catch (Exception e) {
+			System.err.println("Err in Database : " + e.toString());
+		}
+				
 		Thread heartBeatThread = new Thread(new Runnable() {
 			public void run() {
-				try {
-					Thread.sleep(1000);
-				} catch (InterruptedException e) {
-					System.err.println("Interrupted from sleep");
-				}
-				try {
-					sendHeartBeat();
-				} catch (RemoteException e) {
-					System.err.println("Unable to find NameNode");
+				while(true) {
+					try {
+						Thread.sleep(1000);
+					} catch (InterruptedException e) {
+						System.err.println("Interrupted from sleep");
+					}
+					try {
+						sendHeartBeat();
+					} catch (RemoteException e) {
+						System.err.println("Unable to find NameNode : " + e.toString());
+					}	
 				}
 			}
 		});
 		Thread blockReportThread = new Thread(new Runnable() {
 			public void run() {
-				try {
-					Thread.sleep(2000);
-				} catch (InterruptedException e) {
-					System.err.println("Interrupted from sleep");
+				while(true) {
+					try {
+						Thread.sleep(2000);
+					} catch (InterruptedException e) {
+						System.err.println("Interrupted from sleep");
+					}
+					try {
+						sendBlockReport();	
+					} catch (Exception e) {
+						System.err.println("Err sending Block Report : " + e.toString());
+					}
 				}
-				sendBlockReport();
 			}
 		});
 		
@@ -85,10 +107,7 @@ public class DataNode implements DataNodeRemoteInterfaces {
 	public byte[] writeBlock(byte[] message) {
 		Hdfs.WriteBlockResponse.Builder response = Hdfs.WriteBlockResponse.newBuilder();
 		try {
-			stmt.executeUpdate("create database if not exists hdfs");
-			stmt.execute("use hdfs");
-			stmt.executeUpdate("create table if not exists datablock(blocknum int,data longtext,primary key(blocknum))");
-			WriteBlockRequest writeBlockRequest;
+			Hdfs.WriteBlockRequest writeBlockRequest;
 			writeBlockRequest = Hdfs.WriteBlockRequest.parseFrom(message);
 			String data=new String();
 			data=writeBlockRequest.getData(0).toString();
@@ -116,7 +135,7 @@ public class DataNode implements DataNodeRemoteInterfaces {
 	public byte[] readBlock(byte[] message) {
 		Hdfs.ReadBlockResponse.Builder readBlockResponse = Hdfs.ReadBlockResponse.newBuilder();
 		try {
-			ReadBlockRequest readBlockRequest;
+			Hdfs.ReadBlockRequest readBlockRequest;
 			readBlockRequest = Hdfs.ReadBlockRequest.parseFrom(message);
 			stmt.execute("use hdfs");
 			PreparedStatement pstmt = con.prepareStatement("select data from datablock where blocknum = ?");
@@ -144,8 +163,8 @@ public class DataNode implements DataNodeRemoteInterfaces {
 	}
 	
 	public static void main(String[] args){
-		
-		if(args.length < 1) {
+		nameNodeIp = "172.28.128.3";
+		/*if(args.length < 1) {
 			System.out.println("Please provide namenode ip");
 			return;
 		}
@@ -169,25 +188,27 @@ public class DataNode implements DataNodeRemoteInterfaces {
 		if (inetAddress == null) {
 			System.err.println("Error Obtaining Network Information");
 			System.exit(-1);
-		}
+		}*/
+		
+		System.setProperty("java.rmi.server.hostname", "172.28.128.1");
 		
 		try {
-			registry = LocateRegistry.getRegistry(nameNodeIp);
-			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
-		} catch (Exception e){
-			System.err.println("Err msg : " + e.toString());
-			System.exit(1);
-		}
-		
-
-		try {
-			DataNode dataNode = new DataNode();
-			DataNodeRemoteInterfaces mystub = (DataNodeRemoteInterfaces) UnicastRemoteObject.exportObject(dataNode, 0);
-			Registry localRegistry = LocateRegistry.getRegistry(inetAddress.getHostAddress());
+			LocateRegistry.createRegistry(1099);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-
+		
+		try {
+			//DataNode dataNode = new DataNode();
+			//DataNodeRemoteInterfaces mystub = (DataNodeRemoteInterfaces) UnicastRemoteObject.exportObject(dataNode, 0);
+			Registry localRegistry = LocateRegistry.getRegistry();
+			localRegistry.rebind("DataNode", new DataNode());
+		} catch (Exception e) {
+			//System.out.println("Server Err: " + e.toString());
+			e.printStackTrace();
+			System.exit(1);
+		}
+		System.out.println("Booted DataNode...");
 	}
 	
 	public static void sendHeartBeat() throws RemoteException {

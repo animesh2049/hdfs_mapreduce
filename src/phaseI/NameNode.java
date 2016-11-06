@@ -41,7 +41,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	private static HashSet<Integer> aliveDataNode;
 	private static HashMap<Integer, DataNodeLocation> idToDatanode;
 	private static HashMap<Integer, ArrayList<Integer>> idToBlock;
-	private static Lock lock1, lock2, lock3, lock4;
+	private static Lock lock1, lock2, lock3, lock4, lock5;
 	private static String myIp, interfaceToConnect;
 	
 	public NameNode() throws NumberFormatException, IOException, RemoteException {
@@ -53,7 +53,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		aliveDataNode = new HashSet<Integer>();
 		idToDatanode = new HashMap<Integer, DataNodeLocation>();
 		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
-		lock1 = lock2 = lock3 = lock4 = new ReentrantLock();
+		lock1 = lock2 = lock3 = lock4 = lock5 = new ReentrantLock();
 		
 		InputStream fStream = null;
 		try {
@@ -151,9 +151,8 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 				response.setStatus(1);
 			}
 		} else {  // For writing
-			responseHandle = ++handle;
-			
 			lock2.lock();
+			responseHandle = ++handle;
 			handler.put(fileName, handle);
 			handleToBlocks.put(handle, new ArrayList<Integer>());
 			lock2.unlock();
@@ -188,8 +187,12 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		} catch (Exception e) {
 			System.err.println("Err msg : " + e.toString());
 		}
+		
+		lock5.lock();
 		int tempBlockNumber = ++blockNumber;
 		handleToBlocks.get(tempHandle).add(tempBlockNumber);
+		lock5.unlock();
+		
 		int temp1 = randomNumber.nextInt(aliveDataNode.size());
 		int temp2;
 		while ( (temp2 = randomNumber.nextInt(aliveDataNode.size())) == temp1) {
@@ -199,8 +202,12 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		int tempNodeId1 = (int) aliveDataNode.toArray()[temp1];
 		int tempNodeId2 = (int) aliveDataNode.toArray()[temp2];
 		ArrayList<Hdfs.DataNodeLocation> tempDataNodeLocations =  new ArrayList<Hdfs.DataNodeLocation>();
+		
+		lock5.lock();
 		tempDataNodeLocations.add(idToDatanode.get(tempNodeId1));
 		tempDataNodeLocations.add(idToDatanode.get(tempNodeId2));
+		lock5.unlock();
+		
 		Hdfs.BlockLocations.Builder tempBlockLocations = Hdfs.BlockLocations.newBuilder();
 		tempBlockLocations.addAllLocations(tempDataNodeLocations);
 		
@@ -261,20 +268,28 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 			System.exit(-1);
 		}*/
 		
+		System.setProperty("java.rmi.server.hostname", "172.28.128.3");
+		
+		try {
+			LocateRegistry.createRegistry(1099);
+		} catch (Exception e) {
+			System.out.println("Error starting rmiregistry");
+			System.exit(1);	
+		}
+		
 			try {
-				//NameNode namenode = new NameNode();
-				//RemoteInterfaces mystub = (RemoteInterfaces) UnicastRemoteObject.exportObject(namenode, 0);
 				Registry localRegistry = LocateRegistry.getRegistry();
 				localRegistry.rebind("NameNode", new NameNode());
 			} catch (Exception e) {
 				System.out.println("Server Err : " + e.toString());
 			}
+		System.out.println("Booted Server");
 	}
 	
 	public byte[] heartBeat(byte[] message) {
 		
 		try {
-			aliveDataNode.add(Hdfs.HeartBeatRequest.parseFrom(message).getId()); // Put this in a thread and this operation should be inside lock	
+			Hdfs.HeartBeatRequest.parseFrom(message).getId(); // Put this in a thread and this operation should be inside lock	
 		} catch (Exception e){
 			System.err.println("Err msg : " + e.toString());
 			return Hdfs.HeartBeatResponse.newBuilder().setStatus(1).build().toByteArray();

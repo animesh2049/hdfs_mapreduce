@@ -1,5 +1,3 @@
-killall rmiregistry 2>/dev/null
-javac -d bin -cp libraries/protobuf-java-3.1.0.jar:. src/phaseI/{DataNode,Hdfs,RemoteInterfaces,DataNodeRemoteInterfaces}.java
+javac -d bin -cp .:libraries/mysql-connector-java-5.1.40-bin.jar:libraries/protobuf-java-3.1.0.jar src/phaseI/{DataNode,Hdfs,RemoteInterfaces,DataNodeRemoteInterfaces,NameNode}.java
 cd bin
-rmiregistry &
-java -Djava.rmi.server.codebase=file:$PWD/ phaseI.DataNode
+java -cp .:../libraries/mysql-connector-java-5.1.40-bin.jar:../libraries/protobuf-java-3.1.0.jar phaseI.DataNode
