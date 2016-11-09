@@ -12,7 +12,7 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-
+import com.google.protobuf.ByteString;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -40,6 +40,8 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 	public DataNode() throws RemoteException {
 		super();
 		myId = 1;
+		myIp = ""; // Set your ip here
+		myPort = 1099; // Default
 		try {
 			registry = LocateRegistry.getRegistry("172.28.128.3");
 			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
@@ -61,7 +63,7 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		try {
 			stmt.executeUpdate("create database if not exists hdfs");
 			stmt.execute("use hdfs");
-			stmt.executeUpdate("create table if not exists datablock(blocknum int,data longtext,primary key(blocknum))");	
+			stmt.executeUpdate("create table if not exists datablock(blocknum int,data string,primary key(blocknum))");	
 		} catch (Exception e) {
 			System.err.println("Err in Database : " + e.toString());
 		}
@@ -78,6 +80,14 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 						sendHeartBeat();
 					} catch (RemoteException e) {
 						System.err.println("Unable to find NameNode : " + e.toString());
+						while(true) {
+							try {
+								nameNode = (RemoteInterfaces) LocateRegistry.getRegistry("172.28.128.3").lookup("NameNode");
+								break;
+							} catch (Exception e1) {
+								
+							}
+						}
 					}	
 				}
 			}
@@ -94,6 +104,14 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 						sendBlockReport();	
 					} catch (Exception e) {
 						System.err.println("Err sending Block Report : " + e.toString());
+						while(true) {
+							try {
+								nameNode = (RemoteInterfaces) LocateRegistry.getRegistry("172.28.128.3").lookup("NameNode");
+								break;
+							} catch (Exception e1) {
+								
+							}
+						}
 					}
 				}
 			}
@@ -109,16 +127,15 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		try {
 			Hdfs.WriteBlockRequest writeBlockRequest;
 			writeBlockRequest = Hdfs.WriteBlockRequest.parseFrom(message);
-			String data=new String();
-			data=writeBlockRequest.getData(0).toString();
-			
+			String data = new String();
+			data = ByteString.copyFrom(writeBlockRequest.getDataList()).toString();
+			System.out.println(data);
 			PreparedStatement pstmt = con.prepareStatement("insert into datablock(blocknum,data) values(?,?)");
 			pstmt.setInt(1, writeBlockRequest.getBlockInfo().getBlockNumber());
 			pstmt.setString(2, data);
 			pstmt.executeUpdate();
 
 			response.setStatus(0);
-			
 			
 		} catch (SQLException e) {
 			response.setStatus(1);
@@ -144,7 +161,8 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 			String dt=null;
 			while(rs.next())
 			{
-				dt=rs.getString(1);
+				dt = rs.getString(1);
+				System.out.println(dt);
 			}
 			if(dt==null)
 				readBlockResponse.setStatus(1);
@@ -215,7 +233,7 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		nameNode.heartBeat(Hdfs.HeartBeatRequest.newBuilder().setId(myId).build().toByteArray());
 	}
 	
-	public static void sendBlockReport() {
+	public static void sendBlockReport() throws RemoteException {
 		Hdfs.BlockReportRequest.Builder blockReport = Hdfs.BlockReportRequest.newBuilder();
 		ResultSet res = null;
 		ArrayList<Integer> blockNumbers = new ArrayList<Integer>();
@@ -231,5 +249,11 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 			e.printStackTrace();
 		}
 		blockReport.addAllBlockNumbers(blockNumbers);
+		Hdfs.DataNodeLocation.Builder myLocation = Hdfs.DataNodeLocation.newBuilder();
+		myLocation.setIp(myIp);
+		myLocation.setPort(myPort);
+		Hdfs.DataNodeLocation tempLocation = myLocation.build();
+		blockReport.setLocation(tempLocation);
+		nameNode.blockReport(blockReport.build().toByteArray());
 	}
 }

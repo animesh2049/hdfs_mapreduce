@@ -1,6 +1,8 @@
 package phaseI;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Scanner;
 import java.util.List;
 import java.util.Set;
@@ -27,7 +29,7 @@ public class Client {
 	public static void main(String[] args) throws NotBoundException, IOException{
 
 		try {
-			registry = LocateRegistry.getRegistry(host);
+			registry = LocateRegistry.getRegistry("172.28.128.3");
 			nameNode = (RemoteInterfaces) registry.lookup("NameNode");
 		} catch (Exception e){
 			System.err.println("Err msg : " + e.toString());
@@ -91,7 +93,18 @@ public class Client {
 		request.setForRead(true);
 		Hdfs.OpenFileRequest encoded_req = request.build();
 		
-		encoded_response = nameNode.openFile(encoded_req.toByteArray());
+		try {
+			encoded_response = nameNode.openFile(encoded_req.toByteArray());	
+		} catch (Exception e) {
+			while(true) {
+				try {
+					nameNode = (RemoteInterfaces) LocateRegistry.getRegistry("172.28.128.3").lookup("NameNode");
+					encoded_response = nameNode.openFile(encoded_req.toByteArray());
+					break;
+				} catch (Exception e1) {}
+			}
+		}
+		
 		response = Hdfs.OpenFileResponse.parseFrom(encoded_response);
 		
 		status = response.getStatus();
@@ -101,7 +114,7 @@ public class Client {
 		}
 		
 		handle = response.getHandle();
-		ArrayList<Integer> blocks = (ArrayList<Integer>) response.getBlockNumsList();
+		ArrayList<Integer> blocks = new ArrayList<Integer>(response.getBlockNumsList());
 		
 		Hdfs.BlockLocationRequest.Builder locationRequest = Hdfs.BlockLocationRequest.newBuilder();
 		locationRequest.addAllBlockNums(blocks);
@@ -126,6 +139,8 @@ public class Client {
 				if (Hdfs.ReadBlockResponse.parseFrom(readBlockResponse).getStatus() != 0){
 					System.err.println("Err occured Trying next ...");
 				} else {
+					//Files.write(Paths.get(fileName), Hdfs.ReadBlockResponse.parseFrom(readBlockResponse).getData(0).toByteArray());
+					//fileWriter.write(ByteString.copyFrom(Hdfs.ReadBlockResponse.parseFrom(readBlockResponse).getDataList()).toString());
 					fileWriter.write(Hdfs.ReadBlockResponse.parseFrom(readBlockResponse).getData(0).toByteArray());
 					break;
 				}
@@ -138,26 +153,28 @@ public class Client {
 		int handle = -1;
 		Hdfs.OpenFileRequest.Builder openFileRequest = Hdfs.OpenFileRequest.newBuilder();
 		int bytesRead = 0;
-		InputStream fStream = new FileInputStream(fileName);
 		byte[] fileChunk = new byte[blockSize];
 		
 		openFileRequest.setForRead(false);
 		openFileRequest.setFileName(fileName);
-		
+
 		Path path = Paths.get(fileName);
+		
+		if(!Files.exists(path)) {
+			System.err.println("Err: File doesn't exist");
+			return;
+		}
+		
+		if(Files.isDirectory(path)) {
+			System.err.println("Err: It is a directory");
+		}
 		
 		if(!Files.isReadable(path)) {
 			System.err.println("Err: File not readable");
 			return;
 		}
-		if(!Files.exists(path)) {
-			System.err.println("Err: File doesn't exist");
-			return;
-		}
-		if(Files.isDirectory(path)) {
-			System.err.println("Err: It is a directory");
-		}
 		
+		InputStream fStream = new FileInputStream(fileName);
 		byte[] encodedOpenFileResponse = nameNode.openFile(openFileRequest.build().toByteArray());
 		if (Hdfs.OpenFileResponse.parseFrom(encodedOpenFileResponse).getStatus() != 0) {
 			System.err.println("Err occurred");
@@ -174,23 +191,27 @@ public class Client {
 			
 			if (Hdfs.AssignBlockResponse.parseFrom(assignBlockResponse).getStatus() != 0) {
 				System.err.println("Err occurred");
+				fStream.close();
 				return;
 			}
 			
 			Hdfs.BlockLocations blockLocations = Hdfs.AssignBlockResponse.parseFrom(assignBlockResponse).getNewBlock();
-			ArrayList<Hdfs.DataNodeLocation> locationsToReplicate = (ArrayList<Hdfs.DataNodeLocation>) blockLocations.getLocationsList();
+			ArrayList<Hdfs.DataNodeLocation> locationsToReplicate = new ArrayList<Hdfs.DataNodeLocation>(blockLocations.getLocationsList());
 			Hdfs.WriteBlockRequest.Builder writeBlockRequest = Hdfs.WriteBlockRequest.newBuilder();
 			writeBlockRequest.setBlockInfo(blockLocations);
-			writeBlockRequest.addData(ByteString.copyFrom(fileChunk)); // Check the case when fileChunk is not full
+			writeBlockRequest.addData(ByteString.copyFrom(bytesRead == blockSize ? fileChunk : Arrays.copyOf(fileChunk, bytesRead))); // Check the case when fileChunk is not full
+			
 			boolean gotDataNode = false;
 			DataNodeRemoteInterfaces dn = null;
 			
 			for (Hdfs.DataNodeLocation tempLocation : locationsToReplicate) {
 				
 				try {
-					dn = (DataNodeRemoteInterfaces) LocateRegistry.getRegistry(tempLocation.getIp(), tempLocation.getPort());
+					System.out.println(tempLocation.getIp() + " " + tempLocation.getPort());
+					dn = (DataNodeRemoteInterfaces) LocateRegistry.getRegistry(tempLocation.getIp(), tempLocation.getPort()).lookup("DataNode");
 					gotDataNode = true;
 				} catch (Exception e) {
+					System.out.println("Didn't got the datanode :(");
 					continue;
 				}
 				
@@ -199,8 +220,6 @@ public class Client {
 					System.err.println("Err occurred");
 					gotDataNode = false;
 					continue;
-				} else {
-					break;
 				}
 			}
 			
@@ -225,7 +244,7 @@ public class Client {
 			System.err.println("Some err occurred ");
 			return;
 		}
-		Set<String> fileNames = (Set<String>) Hdfs.ListFilesResponse.parseFrom(encodedListFileResponse).getFileNamesList();
+		Set<String> fileNames = new HashSet<String>(Hdfs.ListFilesResponse.parseFrom(encodedListFileResponse).getFileNamesList());
 		for (String fileName : fileNames) {
 			System.out.println(fileName);
 		}

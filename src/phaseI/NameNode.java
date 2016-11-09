@@ -26,6 +26,7 @@ import java.util.HashSet;
 import java.util.Random;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.Collections;
 
 import phaseI.Hdfs.DataNodeLocation;
 
@@ -34,12 +35,12 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	private static final long serialVersionUID = 1L;
 	private static int handle = 0;
 	private static int blockNumber = 0;
-	private static HashMap<String, Integer> handler;
+	private static HashMap<String, Integer> tempHandler, finalHandler;
 	private static HashMap<Integer, ArrayList<Integer>> handleToBlocks;
 	private static HashMap<Integer, HashSet<DataNodeLocation>> blockToReplicas;
 	private static String persistanceFile = "namenodefile.conf";
 	private static HashSet<Integer> aliveDataNode;
-	private static HashMap<Integer, DataNodeLocation> idToDatanode;
+	private static HashMap<Integer, DataNodeLocation> idToDataNode;
 	private static HashMap<Integer, ArrayList<Integer>> idToBlock;
 	private static Lock lock1, lock2, lock3, lock4, lock5;
 	private static String myIp, interfaceToConnect;
@@ -47,13 +48,14 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	public NameNode() throws NumberFormatException, IOException, RemoteException {
 		super();
 		String line;
-		handler = new HashMap<String, Integer>();
+		tempHandler = finalHandler = new HashMap<String, Integer>();
 		handleToBlocks = new HashMap<Integer, ArrayList<Integer>>();
 		blockToReplicas = new HashMap<Integer, HashSet<DataNodeLocation>>();
 		aliveDataNode = new HashSet<Integer>();
-		idToDatanode = new HashMap<Integer, DataNodeLocation>();
+		idToDataNode = new HashMap<Integer, DataNodeLocation>();
 		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
 		lock1 = lock2 = lock3 = lock4 = lock5 = new ReentrantLock();
+		
 		
 		InputStream fStream = null;
 		try {
@@ -69,17 +71,22 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		
 		while( (line = fBufferReader.readLine()) != null) {
 			String[] splittedString = line.split("--");
-			handler.put(splittedString[0], Integer.parseInt(splittedString[1]));
+			finalHandler.put(splittedString[0], Integer.parseInt(splittedString[1]));
 			String[] blockString = splittedString[2].split(",");
 			ArrayList<Integer> blockNums = new ArrayList<Integer>();
 			for(String tempString : blockString) {
 				blockNums.add(Integer.parseInt(tempString));
 			}
 			
-			lock3.lock();
 			handleToBlocks.put(Integer.parseInt(splittedString[1]), blockNums);
-			lock3.unlock();
 		}
+		Integer maxInteger = 0;
+		for (ArrayList<Integer> temp1 : handleToBlocks.values()) {
+			Integer temp2 = Collections.max(temp1);
+			if(temp2 > maxInteger)
+				maxInteger = temp2;
+		}
+		blockNumber = maxInteger;
 		
 		try {
 			fStream.close();
@@ -93,12 +100,16 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	
 	private static int commit(int fileHandle) throws IOException {
 		String fileName = "";
-		for(String temp : handler.keySet()) {
-			if(handler.get(temp) == fileHandle) {
+		for(String temp : tempHandler.keySet()) {
+			if(tempHandler.get(temp) == fileHandle) {
 				fileName = temp;
 				break;
 			}
 		}
+		
+		lock3.lock();
+		finalHandler.put(fileName, fileHandle);
+		lock3.unlock();
 		
 		String toWrite = fileName + "--" + fileHandle + "--";
 		for(Integer block : handleToBlocks.get(fileHandle)) {
@@ -109,7 +120,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	    BufferedWriter bw = null;
 	    
 	    lock1.lock();
-	    try {					// Do it in lock
+	    try {					
 	    	bw = new BufferedWriter(new FileWriter(persistanceFile, true));
 	    	bw.write(toWrite);
 	    	bw.newLine();
@@ -141,8 +152,8 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		}
 		
 		if(forRead) {
-			if (handler.containsKey(fileName)) {
-				responseHandle = handler.get(fileName);
+			if (finalHandler.containsKey(fileName)) {
+				responseHandle = finalHandler.get(fileName);
 				ArrayList<Integer> blocks = handleToBlocks.get(responseHandle);
 				response.addAllBlockNums(blocks);
 				response.setStatus(0);
@@ -153,7 +164,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		} else {  // For writing
 			lock2.lock();
 			responseHandle = ++handle;
-			handler.put(fileName, handle);
+			tempHandler.put(fileName, handle);
 			handleToBlocks.put(handle, new ArrayList<Integer>());
 			lock2.unlock();
 			
@@ -204,12 +215,17 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		ArrayList<Hdfs.DataNodeLocation> tempDataNodeLocations =  new ArrayList<Hdfs.DataNodeLocation>();
 		
 		lock5.lock();
-		tempDataNodeLocations.add(idToDatanode.get(tempNodeId1));
-		tempDataNodeLocations.add(idToDatanode.get(tempNodeId2));
+		tempDataNodeLocations.add(idToDataNode.get(tempNodeId1));
+		tempDataNodeLocations.add(idToDataNode.get(tempNodeId2));
 		lock5.unlock();
+		
+		for(Hdfs.DataNodeLocation temp : tempDataNodeLocations) {
+			System.out.println(temp.getIp());
+		}
 		
 		Hdfs.BlockLocations.Builder tempBlockLocations = Hdfs.BlockLocations.newBuilder();
 		tempBlockLocations.addAllLocations(tempDataNodeLocations);
+		tempBlockLocations.setBlockNumber(tempBlockNumber);
 		
 		Hdfs.AssignBlockResponse.Builder tempResponse = Hdfs.AssignBlockResponse.newBuilder();
 		tempResponse.setNewBlock(tempBlockLocations);
@@ -219,7 +235,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	
 	public byte[] listFile(byte[] message) {
 		Hdfs.ListFilesResponse.Builder listFileResponse = Hdfs.ListFilesResponse.newBuilder();
-		listFileResponse.addAllFileNames(handler.keySet());
+		listFileResponse.addAllFileNames(finalHandler.keySet());
 		return listFileResponse.build().toByteArray();
 	}
 	
@@ -288,8 +304,14 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	
 	public byte[] heartBeat(byte[] message) {
 		
+		for(String temp : finalHandler.keySet()) {
+			System.out.println(temp + " " + finalHandler.get(temp));
+		}
+		
+		int id;
 		try {
-			Hdfs.HeartBeatRequest.parseFrom(message).getId(); // Put this in a thread and this operation should be inside lock	
+			id = Hdfs.HeartBeatRequest.parseFrom(message).getId(); // Put this in a thread and this operation should be inside lock
+			aliveDataNode.add(id);
 		} catch (Exception e){
 			System.err.println("Err msg : " + e.toString());
 			return Hdfs.HeartBeatResponse.newBuilder().setStatus(1).build().toByteArray();
@@ -313,7 +335,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		}
 		
 		lock4.lock();
-		idToDatanode.put(dataNodeId, dataNodeLocation);
+		idToDataNode.put(dataNodeId, dataNodeLocation);
 		idToBlock.put(dataNodeId, blockNums);
 		lock4.unlock();
 		
