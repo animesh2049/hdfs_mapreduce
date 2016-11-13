@@ -162,12 +162,16 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 			while(rs.next())
 			{
 				dt = rs.getString(1);
+				ByteString temp = dt;
 				System.out.println(dt);
 			}
 			if(dt==null)
 				readBlockResponse.setStatus(1);
-			else
+			else {
 				readBlockResponse.setStatus(0);
+				readBlockResponse.addData(new ByteString(dt));
+			}
+				
 				
 		}  catch (SQLException e) {
 			readBlockResponse.setStatus(1);
