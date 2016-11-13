@@ -48,14 +48,18 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	public NameNode() throws NumberFormatException, IOException, RemoteException {
 		super();
 		String line;
-		tempHandler = finalHandler = new HashMap<String, Integer>();
+		tempHandler = new HashMap<String, Integer>();
+		finalHandler = new HashMap<String, Integer>();
 		handleToBlocks = new HashMap<Integer, ArrayList<Integer>>();
 		blockToReplicas = new HashMap<Integer, HashSet<DataNodeLocation>>();
 		aliveDataNode = new HashSet<Integer>();
 		idToDataNode = new HashMap<Integer, DataNodeLocation>();
 		idToBlock = new HashMap<Integer, ArrayList<Integer>>();
-		lock1 = lock2 = lock3 = lock4 = lock5 = new ReentrantLock();
-		
+		lock1 = new ReentrantLock();
+		lock2 = new ReentrantLock();
+		lock3 = new ReentrantLock();
+		lock4 = new ReentrantLock();
+		lock5 = new ReentrantLock();
 		
 		InputStream fStream = null;
 		try {
@@ -213,16 +217,18 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		int tempNodeId1 = (int) aliveDataNode.toArray()[temp1];
 		int tempNodeId2 = (int) aliveDataNode.toArray()[temp2];
 		ArrayList<Hdfs.DataNodeLocation> tempDataNodeLocations =  new ArrayList<Hdfs.DataNodeLocation>();
-		
-		lock5.lock();
+		Hdfs.DataNodeLocation dn1 = idToDataNode.get(tempNodeId1);
+		Hdfs.DataNodeLocation dn2 = idToDataNode.get(tempNodeId2);
+		HashSet<Hdfs.DataNodeLocation> myloc = new HashSet<Hdfs.DataNodeLocation>();
+
+		myloc.add(dn1); myloc.add(dn2);
 		tempDataNodeLocations.add(idToDataNode.get(tempNodeId1));
 		tempDataNodeLocations.add(idToDataNode.get(tempNodeId2));
+		
+		lock5.lock();
+		blockToReplicas.put(handle, myloc);
 		lock5.unlock();
-		
-		for(Hdfs.DataNodeLocation temp : tempDataNodeLocations) {
-			System.out.println(temp.getIp());
-		}
-		
+			
 		Hdfs.BlockLocations.Builder tempBlockLocations = Hdfs.BlockLocations.newBuilder();
 		tempBlockLocations.addAllLocations(tempDataNodeLocations);
 		tempBlockLocations.setBlockNumber(tempBlockNumber);
@@ -250,7 +256,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 			System.err.println("Err msg : " + e.toString());
 		}
 		
-		ArrayList<Integer> blocks = (ArrayList<Integer>) request.getBlockNumsList(); 
+		ArrayList<Integer> blocks = new ArrayList<Integer>(request.getBlockNumsList()); 
 		for (Integer block : blocks) {
 			Hdfs.BlockLocations.Builder temp = Hdfs.BlockLocations.newBuilder();
 			temp.addAllLocations(blockToReplicas.get(block));
@@ -284,7 +290,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 			System.exit(-1);
 		}*/
 		
-		System.setProperty("java.rmi.server.hostname", "172.28.128.3");
+		System.setProperty("java.rmi.server.hostname", "10.1.40.121");
 		
 		try {
 			LocateRegistry.createRegistry(1099);
@@ -303,11 +309,6 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 	}
 	
 	public byte[] heartBeat(byte[] message) {
-		
-		for(String temp : finalHandler.keySet()) {
-			System.out.println(temp + " " + finalHandler.get(temp));
-		}
-		
 		int id;
 		try {
 			id = Hdfs.HeartBeatRequest.parseFrom(message).getId(); // Put this in a thread and this operation should be inside lock
@@ -329,7 +330,7 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 			Hdfs.BlockReportRequest reportRequest = Hdfs.BlockReportRequest.parseFrom(message);
 			dataNodeId = reportRequest.getId();
 			dataNodeLocation = reportRequest.getLocation();
-			blockNums = (ArrayList<Integer>) reportRequest.getBlockNumbersList();	
+			blockNums = new ArrayList<Integer>(reportRequest.getBlockNumbersList());	
 		} catch (Exception e) {
 			System.err.println("Err msg : " + e.toString());
 		}
@@ -338,6 +339,20 @@ public class NameNode extends UnicastRemoteObject implements RemoteInterfaces {
 		idToDataNode.put(dataNodeId, dataNodeLocation);
 		idToBlock.put(dataNodeId, blockNums);
 		lock4.unlock();
+
+		for(Integer temp : blockNums) {
+                        if(blockToReplicas.containsKey(temp)) {
+                                lock4.lock();
+                                blockToReplicas.get(temp).add(dataNodeLocation);
+                                lock4.unlock();
+                        } else {
+                                HashSet<Hdfs.DataNodeLocation> temp1 = new HashSet<Hdfs.DataNodeLocation>();
+                                temp1.add(dataNodeLocation);
+                                lock4.lock();
+                                blockToReplicas.put(temp, temp1);
+                                lock4.unlock();
+                        }
+                }
 		
 		return Hdfs.BlockReportResponse.newBuilder().addStatus(0).build().toByteArray();
 	}

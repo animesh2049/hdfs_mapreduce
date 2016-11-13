@@ -63,7 +63,7 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		try {
 			stmt.executeUpdate("create database if not exists hdfs");
 			stmt.execute("use hdfs");
-			stmt.executeUpdate("create table if not exists datablock(blocknum int,data string,primary key(blocknum))");	
+			stmt.executeUpdate("create table if not exists datablock(blocknum int,data longtext,primary key(blocknum))");	
 		} catch (Exception e) {
 			System.err.println("Err in Database : " + e.toString());
 		}
@@ -127,9 +127,14 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		try {
 			Hdfs.WriteBlockRequest writeBlockRequest;
 			writeBlockRequest = Hdfs.WriteBlockRequest.parseFrom(message);
-			String data = new String();
-			data = ByteString.copyFrom(writeBlockRequest.getDataList()).toString();
-			System.out.println(data);
+			String data = null;
+			try {
+				data = new String(ByteString.copyFrom(writeBlockRequest.getDataList()).toByteArray(), "UTF-8");
+			} catch (Exception e) {
+				System.out.println("Error in encoding");
+				data = "";
+			}
+
 			PreparedStatement pstmt = con.prepareStatement("insert into datablock(blocknum,data) values(?,?)");
 			pstmt.setInt(1, writeBlockRequest.getBlockInfo().getBlockNumber());
 			pstmt.setString(2, data);
@@ -158,20 +163,17 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 			PreparedStatement pstmt = con.prepareStatement("select data from datablock where blocknum = ?");
 			pstmt.setInt(1, readBlockRequest.getBlockNumber());
 			ResultSet rs = pstmt.executeQuery();
-			String dt=null;
+			String dt = null;
 			while(rs.next())
 			{
 				dt = rs.getString(1);
-				ByteString temp = dt;
-				System.out.println(dt);
 			}
-			if(dt==null)
+			if(dt == null)
 				readBlockResponse.setStatus(1);
 			else {
 				readBlockResponse.setStatus(0);
-				readBlockResponse.addData(new ByteString(dt));
-			}
-				
+				readBlockResponse.addData(ByteString.copyFromUtf8(dt));
+			}	
 				
 		}  catch (SQLException e) {
 			readBlockResponse.setStatus(1);
@@ -212,7 +214,7 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 			System.exit(-1);
 		}*/
 		
-		System.setProperty("java.rmi.server.hostname", "172.28.128.1");
+		System.setProperty("java.rmi.server.hostname", "10.1.40.121");
 		
 		try {
 			LocateRegistry.createRegistry(1099);
@@ -221,12 +223,9 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 		}
 		
 		try {
-			//DataNode dataNode = new DataNode();
-			//DataNodeRemoteInterfaces mystub = (DataNodeRemoteInterfaces) UnicastRemoteObject.exportObject(dataNode, 0);
 			Registry localRegistry = LocateRegistry.getRegistry();
 			localRegistry.rebind("DataNode", new DataNode());
 		} catch (Exception e) {
-			//System.out.println("Server Err: " + e.toString());
 			e.printStackTrace();
 			System.exit(1);
 		}
@@ -249,7 +248,6 @@ public class DataNode extends UnicastRemoteObject implements DataNodeRemoteInter
 				blockNumbers.add(res.getInt(1));
 			}
 		} catch (SQLException e) {
-			
 			e.printStackTrace();
 		}
 		blockReport.addAllBlockNumbers(blockNumbers);
