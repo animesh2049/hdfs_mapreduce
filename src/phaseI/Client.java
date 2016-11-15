@@ -183,7 +183,6 @@ public class Client {
 		
 		handle = Hdfs.OpenFileResponse.parseFrom(encodedOpenFileResponse).getHandle();
 		
-		
 		Hdfs.AssignBlockRequest.Builder assignBlockRequest = Hdfs.AssignBlockRequest.newBuilder();
 		Hdfs.WriteBlockRequest.Builder writeBlockRequest = Hdfs.WriteBlockRequest.newBuilder();
 		byte[] assignBlockResponse;
@@ -193,13 +192,11 @@ public class Client {
 			assignBlockRequest.clear();
 			assignBlockRequest.setHandle(handle);
 			assignBlockResponse = nameNode.assignBlock(assignBlockRequest.build().toByteArray());
-			
 			if (Hdfs.AssignBlockResponse.parseFrom(assignBlockResponse).getStatus() != 0) {
 				System.err.println("Err occurred");
 				fStream.close();
 				return;
 			}
-			
 			Hdfs.BlockLocations blockLocations = Hdfs.AssignBlockResponse.parseFrom(assignBlockResponse).getNewBlock();
 			ArrayList<Hdfs.DataNodeLocation> locationsToReplicate = new ArrayList<Hdfs.DataNodeLocation>(blockLocations.getLocationsList());
 			
@@ -214,6 +211,7 @@ public class Client {
 				try {
 					System.out.println(tempLocation.getIp() + " " + tempLocation.getPort());
 					dn = (DataNodeRemoteInterfaces) LocateRegistry.getRegistry(tempLocation.getIp(), tempLocation.getPort()).lookup("DataNode");
+					System.out.println("wrote block");
 					gotDataNode = true;
 				} catch (Exception e) {
 					System.out.println("Didn't got the datanode :(");
